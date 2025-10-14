@@ -52,8 +52,9 @@ class CustomThreadPoolTest {
         for (int i = 1; i <= 10; i++) {
             customThreadPool.submit(createRunnable(1));
         }
+        Thread.sleep(350); // wait for all tasks to be picked up
         assertEquals(10, customThreadPool.getWorkers().size());
-        Thread.sleep(2200); // wait for all tasks to complete and threads to terminate
+        Thread.sleep(2000); // wait for all tasks to complete and threads to terminate
         assertEquals(2, customThreadPool.getWorkers().size());
 
         customThreadPool.shutdownNow();
