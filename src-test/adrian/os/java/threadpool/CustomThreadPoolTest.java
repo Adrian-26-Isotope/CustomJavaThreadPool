@@ -288,6 +288,8 @@ class CustomThreadPoolTest {
         assertTrue(9 <= customThreadPool.getCompletedTasksCount());
     }
 
+    // TODO test exception handling
+
 
     private Runnable createRunnable(final int seconds) {
         return () -> {
