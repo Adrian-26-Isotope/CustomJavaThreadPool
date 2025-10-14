@@ -31,4 +31,4 @@ I was not satisfied with the default java ThreadPoolExecutor, so I implemented m
 this project is licensed under the [MIT License](LICENSE.txt).
 
 ## examples
-see [CustomThreadPoolTest.java](CustomThreadPoolTest.java) for detailed examples.
+see [CustomThreadPoolTest.java](src-test/adrian/os/java/threadpool/CustomThreadPoolTest.java) for detailed examples.
