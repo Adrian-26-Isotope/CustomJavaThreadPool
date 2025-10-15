@@ -98,10 +98,8 @@ The thread pool automatically starts upon construction and can be manually contr
 
 ## Examples
 
-### CPU-Intensive Tasks
-
 ```java
-CustomThreadPool cpuPool = CustomThreadPool.builder()
+CustomThreadPool pool = CustomThreadPool.builder()
     .setMinThreads(Runtime.getRuntime().availableProcessors())
     .setMaxThreads(Runtime.getRuntime().availableProcessors())
     .setThreadFactory(Thread.ofPlatform().factory())
@@ -109,26 +107,23 @@ CustomThreadPool cpuPool = CustomThreadPool.builder()
 
 // Submit CPU-bound tasks
 for (int i = 0; i < 1000; i++) {
-    cpuPool.submit(() -> {
-        // CPU-intensive computation
+    pool.submit(() -> {
+        // simulate CPU-intensive computation
         double result = Math.sqrt(Math.random() * 1000000);
     });
 }
 ```
 
-### I/O-Bound Tasks with Virtual Threads
-
 ```java
-CustomThreadPool ioPool = CustomThreadPool.builder()
+CustomThreadPool pool = CustomThreadPool.builder()
     .setMinThreads(0)
     .setMaxThreads(1000)
     .setIdleTime(Duration.ofSeconds(5))
     .setThreadFactory(Thread.ofVirtual().factory()) // Default
     .build();
 
-// Submit I/O-bound tasks
 for (int i = 0; i < 10000; i++) {
-    ioPool.submit(() -> {
+    pool.submit(() -> {
         try {
             // Simulate I/O operation
             Thread.sleep(100);
@@ -138,8 +133,6 @@ for (int i = 0; i < 10000; i++) {
     });
 }
 ```
-
-### More Examples
 
 See [CustomThreadPoolTest.java](src-test/adrian/os/java/threadpool/CustomThreadPoolTest.java) for more examples.
 
