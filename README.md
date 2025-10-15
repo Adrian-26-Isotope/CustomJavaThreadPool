@@ -31,7 +31,7 @@ threadPool.submit(() -> {
 threadPool.shutdown();
 ```
 
-### Advanced Configuration
+### Advanced Usage
 
 ```java
 import java.time.Duration;
