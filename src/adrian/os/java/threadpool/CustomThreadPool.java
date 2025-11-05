@@ -314,11 +314,22 @@ public class CustomThreadPool extends AbstractExecutorService {
      */
     public static class CustomThreadPoolBuilder {
 
+        private String name = "";        
         private int minThreads = 0;
         private int maxThreads = Integer.MAX_VALUE;
         private Duration idleDuration = Duration.ofSeconds(10);
-        private ThreadFactory threadFactory = Thread.ofVirtual().factory();
+        private ThreadFactory threadFactory;
 
+
+        /**
+         * Set the name for the worker threads.<br>
+         * <br>
+         * Default is JVM name.
+         */
+        public CustomThreadPoolBuilder setName(final String name) {
+            this.name = name;
+            return this;
+        }
 
         /**
          * Set the minimum amount of threads.<br>
@@ -364,6 +375,14 @@ public class CustomThreadPool extends AbstractExecutorService {
          * @return the newly constructed {@link CustomThreadPool}.
          */
         public CustomThreadPool build() {
+            if (this.threadFactory == null) {
+                if ((this.name != null) && !this.name.isBlank()) {
+                    this.threadFactory = Thread.ofVirtual().name(this.name + "#", 0).factory();
+                }
+                else {
+                    this.threadFactory = Thread.ofVirtual().factory();
+                }
+            }            
             return new CustomThreadPool(this.minThreads, this.maxThreads, this.idleDuration, this.threadFactory);
         }
 
