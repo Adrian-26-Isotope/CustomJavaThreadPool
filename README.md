@@ -38,10 +38,11 @@ import java.time.Duration;
 import java.util.concurrent.ThreadFactory;
 
 CustomThreadPool threadPool = CustomThreadPool.builder()
-    .setMinThreads(2)                          // Minimum 2 core threads
-    .setMaxThreads(10)                         // Maximum 10 threads
-    .setIdleTime(Duration.ofSeconds(30))       // Idle timeout of 30 seconds
-    .setThreadFactory(Thread.ofPlatform().factory()) // Use platform threads
+    .setName("MyWorker")                               // Name prefix for worker threads
+    .setMinThreads(2)                                  // Minimum 2 core threads
+    .setMaxThreads(10)                                 // Maximum 10 threads
+    .setIdleTime(Duration.ofSeconds(30))               // Idle timeout of 30 seconds
+    .setThreadFactory(Thread.ofPlatform().factory())   // Use platform threads
     .build();
 
 // Submit multiple tasks
@@ -64,6 +65,7 @@ threadPool.shutdown();
 
 | Parameter | Default Value | Description |
 |-----------|---------------|-------------|
+| `name` | JVM default | Name prefix for worker threads |
 | `minThreads` | `0` | Minimum number of core threads that persist even when idle |
 | `maxThreads` | `Integer.MAX_VALUE` | Maximum number of threads that can be created |
 | `idleTime` | `10 seconds` | Time after which idle non-core threads are terminated |
