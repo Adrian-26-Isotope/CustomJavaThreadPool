@@ -35,6 +35,7 @@ public class CustomThreadPool extends AbstractExecutorService {
     /**
      * @return a {@link CustomThreadPool} builder.<br>
      *         Default values are:<br>
+     *         - name = JVM default<br>     
      *         - minimum threads = 0<br>
      *         - maximum threads = {@link Integer#MAX_VALUE}<br>
      *         - thread idle time = {@code Duration.ofSeconds(10)}<br>
