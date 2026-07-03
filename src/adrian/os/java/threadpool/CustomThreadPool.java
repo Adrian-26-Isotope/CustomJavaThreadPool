@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -150,6 +151,9 @@ public class CustomThreadPool extends AbstractExecutorService {
     public void execute(final Runnable command) {
         if (offer2Queue(Objects.requireNonNull(command))) {
             adjustWorkers();
+        }
+        else {
+            throw new RejectedExecutionException("Task " + command + " rejected: thread pool is not RUNNING");
         }
     }
 
