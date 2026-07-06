@@ -8,7 +8,7 @@ A flexible and efficient custom thread pool implementation in Java that provides
 - **Idle Thread Management**: Automatic thread termination after configurable idle time
 - **Core vs Non-Core Workers**: Distinction between persistent core threads and scalable non-core threads
 - **Custom Thread Factory Support**: Use your own thread factory or default to virtual threads
-- **Multiple Polling Strategies**: Different task polling behaviors for various thread pool states
+- **Per-State Polling Behavior**: Different task polling behavior for each thread pool state
 - **Task Completion Tracking**: Monitor completed task counts across all workers
 - **Standard ExecutorService Interface**: Implements `AbstractExecutorService` for compatibility
 
@@ -77,11 +77,11 @@ threadPool.shutdown();
 
 - **`CustomThreadPool`**: Main thread pool implementation extending `AbstractExecutorService`
 - **`Worker`**: Individual worker threads that execute tasks
-- **`ITaskPollingStrategy`**: Interface defining task polling behavior
-- **Polling Strategies**:
-  - `RunningTaskPollingStrategy`: For active thread pools
-  - `ShutdownTaskPollingStrategy`: For graceful shutdown
-  - `TerminatedTaskPollingStrategy`: For terminated pools
+- **`ThreadPoolState`**: Enum representing the pool's lifecycle state, where each
+  constant also defines its own task polling behavior:
+  - `RUNNING`: Workers block-poll for tasks, waiting up to the idle timeout
+  - `SHUTDOWN`: Workers drain remaining tasks without blocking
+  - `NOT_RUNNING`: Workers always receive `null` (no more tasks to process)
 
 ### Thread Management
 

@@ -1,0 +1,85 @@
+package adrian.os.java.threadpool;
+
+/**
+ * Dedicated background worker that reacts to
+ * {@link CustomThreadPool#execute(Runnable)}
+ * calls by running {@link CustomThreadPool#performAdjustment()} on its own
+ * thread,
+ * decoupling that (potentially expensive) work from the thread calling
+ * {@code execute()}.
+ */
+class WorkerAdjuster implements Runnable {
+
+    private final CustomThreadPool threadPool;
+    private final Thread thread;
+    private final Object signalLock = new Object();
+    private boolean dirty = false;
+
+    protected WorkerAdjuster(final CustomThreadPool customThreadPool) {
+        this.threadPool = customThreadPool;
+        this.thread = this.threadPool.getThreadFactory().newThread(this);
+        this.thread.start();
+    }
+
+    /**
+     * @return the underlying thread.
+     */
+    protected Thread getThread() {
+        return this.thread;
+    }
+
+    /**
+     * Signal that worker adjustment may be necessary (e.g. after a task was
+     * enqueued). Returns immediately; the actual adjustment work happens
+     * asynchronously on this adjuster's own thread.
+     */
+    protected void signal() {
+        synchronized (this.signalLock) {
+            this.dirty = true;
+            this.signalLock.notifyAll();
+        }
+    }
+
+    /**
+     * Wake this adjuster up so it can notice pool termination and stop, even if
+     * no adjustment is currently pending.
+     */
+    protected void wakeup() {
+        synchronized (this.signalLock) {
+            this.signalLock.notifyAll();
+        }
+    }
+
+    @Override
+    public void run() {
+        while (true) {
+            if (!waitTillDirty()) {
+                return; // pool terminated --> exit
+            }
+            try {
+                this.threadPool.performAdjustment();
+            } catch (RuntimeException e) {
+                // TODO proper exception handling
+                System.err.println("Worker adjustment failed with exception: " + e);
+            }
+        }
+    }
+
+    private boolean waitTillDirty() {
+        synchronized (this.signalLock) {
+            while (!this.dirty) {
+                if (this.threadPool.isTerminated()) {
+                    return false;
+                }
+                try {
+                    this.signalLock.wait();
+                } catch (InterruptedException e) {
+                    // termination is driven by pool state, not interruption; keep looping
+                }
+            }
+            this.dirty = false;
+            return true;
+        }
+    }
+
+}
