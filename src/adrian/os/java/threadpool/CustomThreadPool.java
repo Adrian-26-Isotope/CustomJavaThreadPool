@@ -47,17 +47,17 @@ public class CustomThreadPool extends AbstractExecutorService {
     /**
      * Constructor
      *
-     * @param minThreads   the minimum amount of threads that shall not be terminated if idle. Must be greater than or
-     *                     equal to 0 and less than or equal to maxThreads.
-     * @param maxThreads   the maximum amount of threads created if enough tasks are submitted. Must be greater than 0
-     *                     and greater than or equal to minThreads.
+     * @param minThreads the minimum amount of threads that shall not be terminated if idle. Must be greater than or
+     *            equal to 0 and less than or equal to maxThreads.
+     * @param maxThreads the maximum amount of threads created if enough tasks are submitted. Must be greater than 0
+     *            and greater than or equal to minThreads.
      * @param idleDuration the duration after which threads will be terminated. Negative durations will be treated as
-     *                     {@code Duration.ZERO}.
-     * @param threadFact   a factory to define thread creation.
+     *            {@code Duration.ZERO}.
+     * @param threadFact a factory to define thread creation.
      */
     public CustomThreadPool(final int minThreads, final int maxThreads, final Duration idleDuration,
             final ThreadFactory threadFact) {
-        if (minThreads < 0 || maxThreads < 1 || minThreads > maxThreads) {
+        if ((minThreads < 0) || (maxThreads < 1) || (minThreads > maxThreads)) {
             throw new IllegalArgumentException("invalid min/max threads: min=" + minThreads + ", max=" + maxThreads);
         }
         setState(ThreadPoolState.NOT_RUNNING);

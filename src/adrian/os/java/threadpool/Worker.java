@@ -15,7 +15,7 @@ public class Worker implements Runnable {
 
     /**
      * @param customThreadPool the thread pool that manages this worker.
-     * @param keepAlive        true if this shall be a core worker and not terminate.
+     * @param keepAlive true if this shall be a core worker and not terminate.
      */
     protected Worker(final CustomThreadPool customThreadPool, final boolean keepAlive) {
         this.threadPool = customThreadPool;
