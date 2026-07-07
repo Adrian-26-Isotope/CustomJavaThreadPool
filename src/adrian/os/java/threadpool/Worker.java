@@ -15,8 +15,7 @@ public class Worker implements Runnable {
 
     /**
      * @param customThreadPool the thread pool that manages this worker.
-     * @param keepAlive        true if this shall be a core worker and not
-     *                         terminate.
+     * @param keepAlive        true if this shall be a core worker and not terminate.
      */
     protected Worker(final CustomThreadPool customThreadPool, final boolean keepAlive) {
         this.threadPool = customThreadPool;
@@ -25,7 +24,7 @@ public class Worker implements Runnable {
     }
 
     /**
-     * get the underlaying thread.
+     * get the underlying thread.
      */
     protected Thread getThread() {
         return this.thread;
@@ -66,33 +65,45 @@ public class Worker implements Runnable {
             while (!this.thread.isInterrupted() && !this.threadPool.isTerminated() && ((task = getTask()) != null)) {
                 runTask(task);
             }
-        } finally {
+        }
+        finally {
             this.threadPool.stopWorker(this);
         }
     }
 
     private Runnable getTask() {
-        return this.threadPool.pollTask(this);
+        Runnable task = this.threadPool.pollTask(this);
+        if (task != null) {
+            // flip idle here, right as the task leaves the queue,
+            // otherwise countIdleWorkers() (used to size new workers in
+            // performAdjustment()) can still see this worker as idle even though its
+            // task has already left the queue, under-provisioning new workers by
+            // exactly the number of workers caught in that window.
+            this.idle = false;
+        }
+        return task;
     }
 
     private void runTask(final Runnable task) {
         try {
-            this.idle = false;
             task.run();
             this.completedTasksCount.incrementAndGet();
-        } catch (Exception e) {
-            handleTaskError(e, task);
-        } finally {
+        }
+        catch (Exception e) {
+            handleTaskError(e);
+        }
+        finally {
             this.idle = true;
         }
     }
 
     /**
-     * this handles exceptions thrown by the tasks.
+     * this handles exceptions thrown by the tasks, by delegating to this worker's thread's
+     * {@link Thread.UncaughtExceptionHandler}, the same pluggable mechanism used for uncaught exceptions elsewhere.
+     * Callers can customize it via the {@link CustomThreadPool}'s {@link java.util.concurrent.ThreadFactory}.
      */
-    protected void handleTaskError(final Exception exeption, final Runnable task) {
-        // TODO implement proper exception handling!
-        System.err.println("Task " + task.toString() + " failed with exception: " + exeption);
+    protected void handleTaskError(final Exception exception) {
+        this.thread.getUncaughtExceptionHandler().uncaughtException(this.thread, exception);
     }
 
 }

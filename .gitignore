@@ -32,3 +32,8 @@ replay_pid*
 /.settings/
 .classpath
 .project
+.vscode/
+
+# user specifics
+mvn-test-jdk25.bat
+mvn-compile-jdk25.bat

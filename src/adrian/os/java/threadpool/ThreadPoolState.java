@@ -19,17 +19,22 @@ enum ThreadPoolState {
             Runnable task = null;
             Thread thread = worker.getThread();
             CustomThreadPool threadPool = worker.getThreadPool();
-            while (!thread.isInterrupted() && threadPool.isRunning()) {
+            // a just-queued task is always polled at least once,
+            // even if the pool state flips RUNNING->SHUTDOWN between dispatch
+            // (getState().pollTask()) and this loop's isRunning() check - otherwise
+            // that task is silently stranded forever (see checkTermination()).
+            do {
                 try {
                     task = threadPool.getTasks().poll(threadPool.getIdleTime().toNanos(), TimeUnit.NANOSECONDS);
-                } catch (InterruptedException _) {
+                }
+                catch (InterruptedException _) {
                     thread.interrupt();
                 }
                 if ((task != null) || !worker.isCore()) {
                     // core workers will continue polling if task is null
                     return task;
                 }
-            }
+            } while (!thread.isInterrupted() && threadPool.isRunning());
             return task;
         }
     },

@@ -1,12 +1,9 @@
 package adrian.os.java.threadpool;
 
 /**
- * Dedicated background worker that reacts to
- * {@link CustomThreadPool#execute(Runnable)}
- * calls by running {@link CustomThreadPool#performAdjustment()} on its own
- * thread,
- * decoupling that (potentially expensive) work from the thread calling
- * {@code execute()}.
+ * Dedicated background worker that reacts to {@link CustomThreadPool#execute(Runnable)} calls by running
+ * {@link CustomThreadPool#performAdjustment()} on its own thread, decoupling that (potentially expensive) work from the
+ * thread calling {@code execute()}.
  */
 class WorkerAdjuster implements Runnable {
 
@@ -29,9 +26,8 @@ class WorkerAdjuster implements Runnable {
     }
 
     /**
-     * Signal that worker adjustment may be necessary (e.g. after a task was
-     * enqueued). Returns immediately; the actual adjustment work happens
-     * asynchronously on this adjuster's own thread.
+     * Signal that worker adjustment may be necessary (e.g. after a task was enqueued). Returns immediately; the actual
+     * adjustment work happens asynchronously on this adjuster's own thread.
      */
     protected void signal() {
         synchronized (this.signalLock) {
@@ -41,8 +37,7 @@ class WorkerAdjuster implements Runnable {
     }
 
     /**
-     * Wake this adjuster up so it can notice pool termination and stop, even if
-     * no adjustment is currently pending.
+     * Wake this adjuster up so it can notice pool termination and stop, even if no adjustment is currently pending.
      */
     protected void wakeup() {
         synchronized (this.signalLock) {
@@ -58,9 +53,11 @@ class WorkerAdjuster implements Runnable {
             }
             try {
                 this.threadPool.performAdjustment();
-            } catch (RuntimeException e) {
-                // TODO proper exception handling
-                System.err.println("Worker adjustment failed with exception: " + e);
+            }
+            catch (RuntimeException e) {
+                // keep looping regardless, so a
+                // bad adjustment never permanently kills this coordinator thread.
+                this.thread.getUncaughtExceptionHandler().uncaughtException(this.thread, e);
             }
         }
     }
@@ -73,7 +70,8 @@ class WorkerAdjuster implements Runnable {
                 }
                 try {
                     this.signalLock.wait();
-                } catch (InterruptedException e) {
+                }
+                catch (InterruptedException e) {
                     // termination is driven by pool state, not interruption; keep looping
                 }
             }

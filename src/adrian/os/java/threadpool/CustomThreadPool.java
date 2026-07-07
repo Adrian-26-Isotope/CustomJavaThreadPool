@@ -14,8 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * This thread pool implementation uses a variable amount of threads to process
- * submitted tasks.
+ * This thread pool implementation uses a variable amount of threads to process submitted tasks.
  */
 public class CustomThreadPool extends AbstractExecutorService {
 
@@ -48,22 +47,23 @@ public class CustomThreadPool extends AbstractExecutorService {
     /**
      * Constructor
      *
-     * @param minThreads   the minimum amount of threads that shall not be
-     *                     terminated if idle.
-     * @param maxThreads   the maximum amount of threads created if enough tasks are
-     *                     submitted.
-     * @param idleDuration the duration after which threads will be terminated.
+     * @param minThreads   the minimum amount of threads that shall not be terminated if idle. Must be greater than or
+     *                     equal to 0 and less than or equal to maxThreads.
+     * @param maxThreads   the maximum amount of threads created if enough tasks are submitted. Must be greater than 0
+     *                     and greater than or equal to minThreads.
+     * @param idleDuration the duration after which threads will be terminated. Negative durations will be treated as
+     *                     {@code Duration.ZERO}.
      * @param threadFact   a factory to define thread creation.
      */
     public CustomThreadPool(final int minThreads, final int maxThreads, final Duration idleDuration,
             final ThreadFactory threadFact) {
-        if (minThreads > maxThreads) {
-            throw new IllegalArgumentException("minThreads must not be greater than maxThreads");
+        if (minThreads < 0 || maxThreads < 1 || minThreads > maxThreads) {
+            throw new IllegalArgumentException("invalid min/max threads: min=" + minThreads + ", max=" + maxThreads);
         }
         setState(ThreadPoolState.NOT_RUNNING);
         this.minThreads = minThreads;
         this.maxThreads = maxThreads;
-        this.idleTime = idleDuration;
+        this.idleTime = idleDuration.isNegative() ? Duration.ZERO : idleDuration;
         this.threadFactory = threadFact;
         this.tasks = new LinkedBlockingQueue<>();
         this.workers = Collections.synchronizedList(new ArrayList<>(minThreads));
@@ -122,8 +122,7 @@ public class CustomThreadPool extends AbstractExecutorService {
     }
 
     /**
-     * start this thread pool, if not already started. Is automatically started at
-     * construction.
+     * start this thread pool, if not already started. Is automatically started at construction.
      */
     public synchronized void start() {
         if (getState() == ThreadPoolState.NOT_RUNNING) {
@@ -139,7 +138,8 @@ public class CustomThreadPool extends AbstractExecutorService {
     public void execute(final Runnable command) {
         if (offer2Queue(Objects.requireNonNull(command))) {
             adjustWorkers();
-        } else {
+        }
+        else {
             throw new RejectedExecutionException("Task " + command + " rejected: thread pool is not RUNNING");
         }
     }
@@ -155,11 +155,9 @@ public class CustomThreadPool extends AbstractExecutorService {
     }
 
     /**
-     * signal that worker adjustment may be necessary (e.g. after a task was
-     * enqueued). Returns immediately; the actual work
-     * ({@link #performAdjustment()}) happens asynchronously on the
-     * {@link WorkerAdjuster}'s own thread, so this no longer serializes
-     * concurrent {@link #execute(Runnable)} calls behind a single lock.
+     * signal that worker adjustment may be necessary (e.g. after a task was enqueued). Returns immediately; the actual
+     * work ({@link #performAdjustment()}) happens asynchronously on the {@link WorkerAdjuster}'s own thread, so this no
+     * longer serializes concurrent {@link #execute(Runnable)} calls behind a single lock.
      */
     private void adjustWorkers() {
         this.workerAdjuster.signal();
@@ -168,21 +166,17 @@ public class CustomThreadPool extends AbstractExecutorService {
     /**
      * if necessary start new workers.<br>
      * <br>
-     * Deliberately does NOT check the pool state: {@link #execute(Runnable)} always
-     * triggers this (via {@link #adjustWorkers()}) right after a successful
-     * {@link #offer2Queue(Runnable)}, even during {@code SHUTDOWN}, so that a
-     * just-enqueued task is guaranteed to get a worker that can drain it (see
-     * {@link ThreadPoolState#SHUTDOWN}). If this method is ever changed to
-     * skip starting workers while not {@code RUNNING}, a task could be left
-     * stranded in {@link #tasks} with no worker left to pick it up, and
-     * {@link #checkTermination()} would then never be satisfied, hanging
-     * {@link #awaitTermination(long, TimeUnit)} forever.<br>
+     * Deliberately does NOT check the pool state: {@link #execute(Runnable)} always triggers this (via
+     * {@link #adjustWorkers()}) right after a successful {@link #offer2Queue(Runnable)}, even during {@code SHUTDOWN},
+     * so that a just-enqueued task is guaranteed to get a worker that can drain it (see
+     * {@link ThreadPoolState#SHUTDOWN}). If this method is ever changed to skip starting workers while not
+     * {@code RUNNING}, a task could be left stranded in {@link #tasks} with no worker left to pick it up, and
+     * {@link #checkTermination()} would then never be satisfied, hanging {@link #awaitTermination(long, TimeUnit)}
+     * forever.<br>
      * <br>
-     * Only ever called by this pool's {@link WorkerAdjuster} thread, one call at
-     * a time, so no lock on {@code this} is needed here for mutual exclusion;
-     * {@link #countIdleWorkers()} and {@link #stopWorker(Worker)} still
-     * synchronize on {@link #workers} to stay safe against concurrently
-     * terminating worker threads.
+     * Only ever called by this pool's {@link WorkerAdjuster} thread, one call at a time, so no lock on {@code this} is
+     * needed here for mutual exclusion; {@link #countIdleWorkers()} and {@link #stopWorker(Worker)} still synchronize
+     * on {@link #workers} to stay safe against concurrently terminating worker threads.
      */
     protected void performAdjustment() {
         int pendingTasks = this.tasks.size();
@@ -250,8 +244,8 @@ public class CustomThreadPool extends AbstractExecutorService {
     }
 
     /**
-     * set the thread pool state. The polling behavior for workers follows
-     * directly from {@link ThreadPoolState#pollTask(Worker)}.
+     * set the thread pool state. The polling behavior for workers follows directly from
+     * {@link ThreadPoolState#pollTask(Worker)}.
      */
     protected synchronized void setState(final ThreadPoolState state) {
         this.state = state;
@@ -285,6 +279,11 @@ public class CustomThreadPool extends AbstractExecutorService {
                 }
             }
 
+            // draining the queue above can make tasks.isEmpty() newly true;
+            // if there were no workers left to pick up those drained tasks (e.g. they
+            // were never started), no worker will ever call stopWorker()->checkTermination()
+            // again, so re-check here or the pool is stuck in SHUTDOWN forever.
+            checkTermination();
         }
         return unfinishedTask;
     }
@@ -396,7 +395,8 @@ public class CustomThreadPool extends AbstractExecutorService {
             if (this.threadFactory == null) {
                 if ((this.name != null) && !this.name.isBlank()) {
                     this.threadFactory = Thread.ofVirtual().name(this.name + "#", 0).factory();
-                } else {
+                }
+                else {
                     this.threadFactory = Thread.ofVirtual().factory();
                 }
             }

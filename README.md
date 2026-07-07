@@ -11,6 +11,7 @@ A flexible and efficient custom thread pool implementation in Java that provides
 - **Per-State Polling Behavior**: Different task polling behavior for each thread pool state
 - **Task Completion Tracking**: Monitor completed task counts across all workers
 - **Standard ExecutorService Interface**: Implements `AbstractExecutorService` for compatibility
+- **Configurable Exception Handling**: Task failures are reported through the worker thread's `Thread.UncaughtExceptionHandler`
 
 ## Quick Start
 
@@ -56,7 +57,6 @@ for (int i = 0; i < 100; i++) {
 
 // Monitor progress
 System.out.println("Completed tasks: " + threadPool.getCompletedTasksCount());
-System.out.println("Active workers: " + threadPool.getWorkers().size());
 
 threadPool.shutdown();
 ```
@@ -77,6 +77,9 @@ threadPool.shutdown();
 
 - **`CustomThreadPool`**: Main thread pool implementation extending `AbstractExecutorService`
 - **`Worker`**: Individual worker threads that execute tasks
+- **`WorkerAdjuster`**: Dedicated background thread that reacts to task submissions by
+  performing worker count adjustments asynchronously, decoupling that work from the
+  calling thread
 - **`ThreadPoolState`**: Enum representing the pool's lifecycle state, where each
   constant also defines its own task polling behavior:
   - `RUNNING`: Workers block-poll for tasks, waiting up to the idle timeout
@@ -89,6 +92,27 @@ The thread pool distinguishes between two types of workers:
 
 1. **Core Workers**: Created up to `minThreads` count, persist even when idle
 2. **Non-Core Workers**: Created on-demand up to `maxThreads`, terminated after idle timeout
+
+### Exception Handling
+
+If a submitted task throws an exception, it is passed to the worker thread's
+`Thread.getUncaughtExceptionHandler()` — the same mechanism used for any
+uncaught exception in a `Thread`. Set a custom handler on your `ThreadFactory`
+to observe or log task failures:
+
+```java
+ThreadFactory factory = Thread.ofVirtual()
+    .uncaughtExceptionHandler((thread, ex) -> log.error("Task failed on " + thread.getName(), ex))
+    .factory();
+
+CustomThreadPool pool = CustomThreadPool.builder()
+    .setThreadFactory(factory)
+    .build();
+```
+
+Without a custom handler, the JVM's default behavior applies (printing the
+thread name and stack trace to `System.err`). Either way, the failing worker
+continues processing further tasks.
 
 ### Thread States and Lifecycle
 
@@ -140,7 +164,7 @@ See [CustomThreadPoolTest.java](src-test/adrian/os/java/threadpool/CustomThreadP
 
 ## Requirements
 
-- Java 24+
+- Java 25+
 - JUnit 5
 
 ## License
