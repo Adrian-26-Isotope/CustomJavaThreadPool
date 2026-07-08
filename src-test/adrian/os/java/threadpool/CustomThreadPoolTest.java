@@ -24,11 +24,11 @@ class CustomThreadPoolTest {
 
     @Test
     void testInitialTreads() {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(5).build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(5).start();
         assertEquals(5, customThreadPool.getWorkers().size(), "Initial thread count should be 5");
         customThreadPool.shutdown();
 
-        customThreadPool = CustomThreadPool.builder().setMinThreads(0).build();
+        customThreadPool = CustomThreadPool.builder().setMinThreads(0).start();
         assertEquals(0, customThreadPool.getWorkers().size(), "Initial thread count should be 0");
 
         customThreadPool.shutdownNow();
@@ -36,14 +36,14 @@ class CustomThreadPoolTest {
 
     @Test
     void testMaxTreads() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMaxThreads(2).build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMaxThreads(2).start();
         assertEquals(0, customThreadPool.getWorkers().size(), "Initial thread count should be 0");
         for (int i = 1; i <= 2; i++) {
-            customThreadPool.submit(createRunnable(5));
+            customThreadPool.submit(createRunnable(5000));
             Thread.sleep(50);
             assertEquals(i, customThreadPool.getWorkers().size());
         }
-        customThreadPool.submit(createRunnable(5));
+        customThreadPool.submit(createRunnable(5000));
         assertEquals(2, customThreadPool.getWorkers().size(), " Max thread count must not exceed 2");
 
         customThreadPool.shutdownNow();
@@ -51,16 +51,16 @@ class CustomThreadPoolTest {
 
     @Test
     void testIdleTreads() throws InterruptedException {
-        CustomThreadPool customThreadPool =
-                CustomThreadPool.builder().setMinThreads(2).setIdleTime(Duration.ofSeconds(1)).setName("IDLE").build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(2)
+                .setIdleTime(Duration.ofSeconds(1)).setName("IDLE").start();
         assertEquals(2, customThreadPool.getWorkers().size());
         Thread.sleep(2000); // Wait for idle time to expire
         assertEquals(2, customThreadPool.getWorkers().size(), "threads must not deceed minimum thread count");
         for (int i = 1; i <= 10; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         Thread.sleep(500); // wait for all tasks to be picked up
-        assertEquals(10, customThreadPool.getWorkers().size()); // FIXME: randomly fails
+        assertEquals(10, customThreadPool.getWorkers().size());
         Thread.sleep(2000); // wait for all tasks to complete and threads to terminate
         assertEquals(2, customThreadPool.getWorkers().size());
 
@@ -68,12 +68,60 @@ class CustomThreadPoolTest {
     }
 
     @Test
+    void testWorkerDemandDoesNotLeak() throws InterruptedException {
+        // Regression test: workerDemand is updated incrementally at each event (see its javadoc)
+        // instead of ever being recomputed from scratch, so a missed/duplicated update would
+        // silently accumulate. Run several submit-and-drain cycles and assert it always returns
+        // to exactly 0 once the queue is empty and every worker has idled out - any drift here
+        // would prove the counter leaks.
+        CustomThreadPool pool1 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P1").start();
+        CustomThreadPool pool2 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P2")
+                .setMinThreads(2).start();
+        CustomThreadPool pool3 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P3")
+                .setMaxThreads(3).start();
+        CustomThreadPool pool4 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(2000)).setName("P4").start();
+        for (int cycle = 1; cycle <= 5; cycle++) {
+            for (int i = 0; i < 8; i++) {
+                pool1.submit(createRunnable(0));
+                pool2.submit(createRunnable(0));
+                pool3.submit(createRunnable(2000));
+                pool4.submit(createRunnable(50));
+            }
+            Thread.sleep(500); // let all tasks complete/workers go idle/workers terminate
+            assertEquals(0, pool1.getWorkers().size(), "implausible worker amount in cycle " + cycle);
+            assertEquals(2, pool2.getWorkers().size(), "implausible worker amount in cycle " + cycle);
+            assertEquals(3, pool3.getWorkers().size(), "implausible worker amount in cycle " + cycle);
+            assertEquals(8, pool4.getWorkers().size(), "implausible worker amount in cycle " + cycle);
+
+            assertEquals(0, pool1.workerDemand.get(), "implausible worker demand in cycle " + cycle);
+            assertEquals(-2, pool2.workerDemand.get(), "implausible worker demand in cycle " + cycle);
+            assertEquals(5, pool3.workerDemand.get(), "implausible worker demand in cycle " + cycle);
+            assertEquals(-8, pool4.workerDemand.get(), "implausible worker demand in cycle " + cycle);
+
+            // interrupt the long-running tasks so the next cycle can start promptly
+            pool3.shutdownNow();
+            assertTrue(pool3.awaitTermination(1, TimeUnit.SECONDS));
+            pool3.start();
+        }
+        pool1.shutdownNow();
+        pool2.shutdownNow();
+        pool3.shutdownNow();
+        pool4.shutdownNow();
+        assertTrue(pool4.awaitTermination(1, TimeUnit.SECONDS));
+        assertEquals(0, pool1.workerDemand.get(), "implausible worker demand after shutdown");
+        assertEquals(0, pool2.workerDemand.get(), "implausible worker demand after shutdown");
+        assertEquals(0, pool3.workerDemand.get(), "implausible worker demand after shutdown");
+        assertEquals(0, pool4.workerDemand.get(), "implausible worker demand after shutdown");
+
+    }
+
+    @Test
     void testTaskQueue() throws InterruptedException {
-        CustomThreadPool customThreadPool =
-                CustomThreadPool.builder().setMaxThreads(4).setIdleTime(Duration.ofMillis(1)).setName("QUEUE").build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMaxThreads(4)
+                .setIdleTime(Duration.ofMillis(1)).setName("QUEUE").start();
         assertEquals(0, customThreadPool.getWorkers().size());
         for (int i = 1; i <= 20; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         Thread.sleep(100);
         assertFalse(customThreadPool.getTasks().isEmpty());
@@ -104,11 +152,11 @@ class CustomThreadPoolTest {
     @Test
     void testShutdown() throws InterruptedException {
         CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4)
-                .setIdleTime(Duration.ofSeconds(5)).setName("SHUTDOWN").build();
+                .setIdleTime(Duration.ofSeconds(5)).setName("SHUTDOWN").start();
         assertEquals(1, customThreadPool.getWorkers().size());
         assertTrue(customThreadPool.isRunning());
         for (int i = 1; i <= 4; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         Thread.sleep(100);
         assertEquals(4, customThreadPool.getWorkers().size());
@@ -120,7 +168,7 @@ class CustomThreadPoolTest {
         Thread.sleep(5000); // give the threads time to terminate
         assertEquals(0, customThreadPool.getWorkers().size(), "thread pool has been shut down");
         assertTrue(customThreadPool.isTerminated());
-        assertThrows(RejectedExecutionException.class, () -> customThreadPool.submit(createRunnable(10)));
+        assertThrows(RejectedExecutionException.class, () -> customThreadPool.submit(createRunnable(10000)));
         assertEquals(0, customThreadPool.getTasks().size());
         assertEquals(0, customThreadPool.getWorkers().size());
         customThreadPool.shutdownNow();
@@ -128,12 +176,12 @@ class CustomThreadPoolTest {
 
     @Test
     void testShutdownNow() throws InterruptedException {
-        CustomThreadPool customThreadPool =
-                CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4).setIdleTime(Duration.ofSeconds(1)).build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4)
+                .setIdleTime(Duration.ofSeconds(1)).start();
         assertEquals(1, customThreadPool.getWorkers().size());
         assertTrue(customThreadPool.isRunning());
         for (int i = 1; i <= 10; i++) {
-            customThreadPool.submit(createRunnable(30));
+            customThreadPool.submit(createRunnable(30000));
         }
         Thread.sleep(100);
         assertEquals(4, customThreadPool.getWorkers().size());
@@ -145,7 +193,7 @@ class CustomThreadPoolTest {
         assertTrue(customThreadPool.isTerminated());
         assertEquals(0, customThreadPool.getWorkers().size(), "thread pool has terminated");
         assertFalse(unfinishedTasks.isEmpty());
-        assertThrows(RejectedExecutionException.class, () -> customThreadPool.submit(createRunnable(10)));
+        assertThrows(RejectedExecutionException.class, () -> customThreadPool.submit(createRunnable(10000)));
         assertEquals(0, customThreadPool.getTasks().size());
         assertEquals(0, customThreadPool.getWorkers().size());
         customThreadPool.shutdownNow();
@@ -153,13 +201,13 @@ class CustomThreadPoolTest {
 
     @Test
     void testRestart() throws InterruptedException {
-        CustomThreadPool customThreadPool =
-                CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4).setIdleTime(Duration.ofSeconds(1)).build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4)
+                .setIdleTime(Duration.ofSeconds(1)).start();
         assertEquals(1, customThreadPool.getWorkers().size());
         assertTrue(customThreadPool.isRunning());
         for (int i = 1; i <= 10; i++) {
             Thread.sleep(50);
-            customThreadPool.submit(createRunnable(30));
+            customThreadPool.submit(createRunnable(30000));
         }
         assertEquals(4, customThreadPool.getWorkers().size());
         assertFalse(customThreadPool.getTasks().isEmpty());
@@ -175,7 +223,7 @@ class CustomThreadPoolTest {
         assertTrue(customThreadPool.isRunning());
         assertEquals(1, customThreadPool.getWorkers().size());
         for (int i = 1; i <= 10; i++) {
-            customThreadPool.submit(createRunnable(3));
+            customThreadPool.submit(createRunnable(3000));
         }
         Thread.sleep(100);
         assertEquals(4, customThreadPool.getWorkers().size());
@@ -185,7 +233,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testAwaitTermination1() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().start();
         assertTrue(customThreadPool.isRunning());
         customThreadPool.shutdown(); // immediately terminate
         assertTrue(customThreadPool.awaitTermination(1, TimeUnit.SECONDS));
@@ -194,9 +242,9 @@ class CustomThreadPoolTest {
 
     @Test
     void testAwaitTermination2() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().start();
         for (int i = 1; i <= 10; i++) {
-            customThreadPool.submit(createRunnable(2));
+            customThreadPool.submit(createRunnable(2000));
         }
         assertTrue(customThreadPool.isRunning());
         customThreadPool.shutdown();
@@ -208,7 +256,7 @@ class CustomThreadPoolTest {
 
         customThreadPool.start();
         for (int i = 1; i <= 10; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         customThreadPool.shutdownNow();
         assertTrue(customThreadPool.awaitTermination(10, TimeUnit.MILLISECONDS));
@@ -220,11 +268,11 @@ class CustomThreadPoolTest {
     @Test
     void testExecute() throws InterruptedException {
         CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(5)
-                .setIdleTime(Duration.ofSeconds(1)).setName("EXE").build();
+                .setIdleTime(Duration.ofSeconds(1)).setName("EXE").start();
         assertTrue(customThreadPool.isRunning());
         assertEquals(1, customThreadPool.getWorkers().size());
         for (int i = 1; i <= 10; i++) {
-            customThreadPool.execute(createRunnable(1));
+            customThreadPool.execute(createRunnable(1000));
         }
         Thread.sleep(100);
         assertEquals(5, customThreadPool.getWorkers().size());
@@ -239,11 +287,11 @@ class CustomThreadPoolTest {
 
     @Test
     void testReuseThreads() throws InterruptedException {
-        CustomThreadPool customThreadPool =
-                CustomThreadPool.builder().setIdleTime(Duration.ofSeconds(5)).setName("REUSE").build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setIdleTime(Duration.ofSeconds(5))
+                .setName("REUSE").start();
         assertEquals(0, customThreadPool.getWorkers().size());
         for (int i = 1; i <= 5; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         Thread.sleep(100); // wait a little till the AdjustWorker ran
         assertEquals(5, customThreadPool.getWorkers().size());
@@ -251,7 +299,7 @@ class CustomThreadPoolTest {
         assertEquals(0, customThreadPool.getTasks().size()); // no tasks to process
         assertEquals(5, customThreadPool.getWorkers().size()); // threads not yet timed out
         for (int i = 1; i <= 5; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         assertEquals(5, customThreadPool.getWorkers().size());
         Thread.sleep(1100); // wait till all tasks have completed
@@ -266,12 +314,12 @@ class CustomThreadPoolTest {
     @Test
     void testCallable() throws InterruptedException {
         CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(5)
-                .setIdleTime(Duration.ofSeconds(1)).setName("CALLABLE").build();
+                .setIdleTime(Duration.ofSeconds(1)).setName("CALLABLE").start();
         assertTrue(customThreadPool.isRunning());
         assertEquals(1, customThreadPool.getWorkers().size());
         List<Future<Integer>> futures = new ArrayList<>();
         for (int i = 1; i <= 10; i++) {
-            futures.add(customThreadPool.submit(createCallable(1)));
+            futures.add(customThreadPool.submit(createCallable(1000)));
         }
         assertFalse(futures.stream().allMatch(Future::isDone));
         Thread.sleep(2500);
@@ -282,11 +330,11 @@ class CustomThreadPoolTest {
 
     @Test
     void testCompleteCount() throws InterruptedException {
-        CustomThreadPool customThreadPool =
-                CustomThreadPool.builder().setIdleTime(Duration.ofSeconds(1)).setName("COUNT").build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setIdleTime(Duration.ofSeconds(1))
+                .setName("COUNT").start();
         assertTrue(customThreadPool.isRunning());
         for (int i = 1; i <= 9; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         assertEquals(0, customThreadPool.getCompletedTasksCount());
         Thread.sleep(1100);
@@ -297,7 +345,7 @@ class CustomThreadPoolTest {
         assertEquals(0, customThreadPool.getWorkers().size());
 
         for (int i = 1; i <= 9; i++) {
-            customThreadPool.submit(createRunnable(1));
+            customThreadPool.submit(createRunnable(1000));
         }
         List<Runnable> canceledTasks = customThreadPool.shutdownNow();
         // some tasks might already been picked up
@@ -313,7 +361,7 @@ class CustomThreadPoolTest {
         // Regression test
         final int taskCount = 60;
         CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(0).setMaxThreads(30)
-                .setIdleTime(Duration.ofMillis(20)).setName("RACE-COUNT").build();
+                .setIdleTime(Duration.ofMillis(20)).setName("RACE-COUNT").start();
 
         // Many short tasks with a tiny idle time cause rapid, continuous worker
         // churn (start/finish/terminate), maximizing the chance of hitting the
@@ -342,8 +390,8 @@ class CustomThreadPoolTest {
             reader.join();
         }
 
-        assertTrue(maxObserved.get() <= taskCount, "getCompletedTasksCount() reported " + maxObserved.get() +
-                " but only " + taskCount + " tasks were submitted - indicates a double-count race");
+        assertTrue(maxObserved.get() <= taskCount, "getCompletedTasksCount() reported " + maxObserved.get()
+                + " but only " + taskCount + " tasks were submitted - indicates a double-count race");
         assertEquals(taskCount, customThreadPool.getCompletedTasksCount());
 
         customThreadPool.shutdownNow();
@@ -352,7 +400,7 @@ class CustomThreadPoolTest {
     @Test
     void testAwaitTerminationReturnsPromptlyOnTermination() throws InterruptedException {
         // Regression test for a missed-wakeup race
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setName("PROMPT").build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setName("PROMPT").start();
         customThreadPool.submit(createRunnable(0));
         customThreadPool.shutdown();
 
@@ -361,15 +409,15 @@ class CustomThreadPoolTest {
         long elapsedMillis = (System.nanoTime() - startNanos) / 1_000_000;
 
         assertTrue(terminated);
-        assertTrue(elapsedMillis < 2000, "awaitTermination() took " + elapsedMillis +
-                "ms although the pool terminated almost immediately - indicates a missed wakeup");
+        assertTrue(elapsedMillis < 2000, "awaitTermination() took " + elapsedMillis
+                + "ms although the pool terminated almost immediately - indicates a missed wakeup");
     }
 
     @Test
     void testAwaitTerminationDoesNotThrowWithTinyTimeout() throws InterruptedException {
         // Regression test for a very little timeout duration.
         for (int i = 0; i < 50; i++) {
-            CustomThreadPool customThreadPool = CustomThreadPool.builder().setName("TINY-" + i).build();
+            CustomThreadPool customThreadPool = CustomThreadPool.builder().setName("TINY-" + i).start();
             customThreadPool.submit(createRunnable(0));
             customThreadPool.shutdown();
             assertDoesNotThrow(() -> customThreadPool.awaitTermination(1, TimeUnit.NANOSECONDS));
@@ -386,7 +434,7 @@ class CustomThreadPoolTest {
         final int iterations = 200;
         for (int i = 0; i < iterations; i++) {
             CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(0).setMaxThreads(4)
-                    .setIdleTime(Duration.ofMillis(50)).setName("RACE-SHUTDOWN-" + i).build();
+                    .setIdleTime(Duration.ofMillis(50)).setName("RACE-SHUTDOWN-" + i).start();
 
             AtomicBoolean taskRan = new AtomicBoolean(false);
             AtomicBoolean rejected = new AtomicBoolean(false);
@@ -425,8 +473,8 @@ class CustomThreadPoolTest {
     void testTaskExceptionReachesUncaughtExceptionHandler() throws InterruptedException {
         AtomicReference<Throwable> caught = new AtomicReference<>();
         ThreadFactory factory = Thread.ofVirtual().uncaughtExceptionHandler((thread, ex) -> caught.set(ex)).factory();
-        CustomThreadPool customThreadPool =
-                CustomThreadPool.builder().setMinThreads(1).setThreadFactory(factory).build();
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setThreadFactory(factory)
+                .start();
 
         RuntimeException failure = new RuntimeException("boom");
         customThreadPool.execute(() -> {
@@ -438,10 +486,10 @@ class CustomThreadPoolTest {
         customThreadPool.shutdownNow();
     }
 
-    private Runnable createRunnable(final int seconds) {
+    private Runnable createRunnable(final int milliseconds) {
         return () -> {
             try {
-                Thread.sleep(1000L * seconds);
+                Thread.sleep(milliseconds);
             }
             catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
@@ -450,10 +498,10 @@ class CustomThreadPoolTest {
         };
     }
 
-    private Callable<Integer> createCallable(final int seconds) {
+    private Callable<Integer> createCallable(final int milliseconds) {
         return () -> {
             try {
-                Thread.sleep(1000L * seconds);
+                Thread.sleep(milliseconds);
             }
             catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();

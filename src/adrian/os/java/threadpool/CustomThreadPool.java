@@ -11,6 +11,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -30,6 +31,27 @@ public class CustomThreadPool extends AbstractExecutorService {
      * task count of terminated workers
      */
     private final AtomicLong completedTasksCount = new AtomicLong(0);
+    /**
+     * net demand for workers, i.e. {@code pendingTasks - idleWorkers}, maintained incrementally. Each event below
+     * applies exactly one atomic increment/decrement:
+     * <ul>
+     * <li>event A, {@code +1}: a task is enqueued ({@link #offer2Queue(Runnable)}): one more task is waiting for a
+     * worker.</li>
+     * <li>event D, {@code -1}: a worker is newly started ({@link #startWorker(boolean)}): it begins idle, adding
+     * capacity.</li>
+     * <li>event C, {@code -1}: a worker finishes a task and goes idle again ({@link #onWorkerIdle()}, called from
+     * {@link Worker}): it becomes available again, adding capacity.</li>
+     * <li>event E, {@code +1}: a worker terminates ({@link #stopWorker(Worker)}): idle capacity is removed again.
+     * Unconditional - event F (a worker terminating while still busy) never happens with this {@link Worker}
+     * implementation, since its run loop only ever exits in the idle state (see {@link #stopWorker(Worker)}).</li>
+     * <li>event G, {@code -N}: {@code N} queued tasks are discarded unclaimed ({@link #shutdownNow()} draining the
+     * queue): demand raised for them at enqueue time must be withdrawn since no worker will ever claim them.</li>
+     * </ul>
+     * Event B, a worker successfully claiming/dequeuing a task ({@code Worker.getTask()}), is deliberately NOT one of
+     * those events: the task leaving the queue and that worker leaving the idle pool happen together, so their
+     * contributions cancel out (net zero).
+     */
+    protected final AtomicInteger workerDemand = new AtomicInteger(0);
 
     /**
      * @return a {@link CustomThreadPool} builder.<br>
@@ -45,7 +67,8 @@ public class CustomThreadPool extends AbstractExecutorService {
     }
 
     /**
-     * Constructor
+     * Constructs a new thread pool with the given parameters. Needs to be started with {@link #start()} before it can
+     * be used.
      *
      * @param minThreads the minimum amount of threads that shall not be terminated if idle. Must be greater than or
      *            equal to 0 and less than or equal to maxThreads.
@@ -67,8 +90,6 @@ public class CustomThreadPool extends AbstractExecutorService {
         this.threadFactory = threadFact;
         this.tasks = new LinkedBlockingQueue<>();
         this.workers = Collections.synchronizedList(new ArrayList<>(minThreads));
-
-        start();
     }
 
     /**
@@ -149,7 +170,12 @@ public class CustomThreadPool extends AbstractExecutorService {
         // shutdown()/checkTermination()'s own check-then-act: a task can never be
         // enqueued after (or concurrently with) the pool declaring itself terminated.
         if (getState() == ThreadPoolState.RUNNING) {
-            return this.tasks.offer(task);
+            boolean offered = this.tasks.offer(task);
+            if (offered) {
+                // event A (see workerDemand javadoc): a pending task raises demand for a worker.
+                this.workerDemand.incrementAndGet();
+            }
+            return offered;
         }
         return false;
     }
@@ -174,45 +200,35 @@ public class CustomThreadPool extends AbstractExecutorService {
      * {@link #checkTermination()} would then never be satisfied, hanging {@link #awaitTermination(long, TimeUnit)}
      * forever.<br>
      * <br>
-     * Only ever called by this pool's {@link WorkerAdjuster} thread, one call at a time, so no lock on {@code this} is
-     * needed here for mutual exclusion; {@link #countIdleWorkers()} and {@link #stopWorker(Worker)} still synchronize
-     * on {@link #workers} to stay safe against concurrently terminating worker threads.
+     * Only ever called by this pool's {@link WorkerAdjuster} thread, one call at a time, so re-reading
+     * {@link #workerDemand} fresh on every loop iteration is race-free: {@code workerDemand} is kept consistent by
+     * single atomic increments/decrements at the events listed in its javadoc.
      */
     protected void performAdjustment() {
-        int pendingTasks = this.tasks.size();
-        int idleWorkers = countIdleWorkers();
-        int missingWorkers = Math.max(0, pendingTasks - idleWorkers);
-        int workersToCreate = Math.min(missingWorkers, this.maxThreads - this.workers.size());
-        while (workersToCreate > 0) {
-            if (this.tasks.isEmpty() || (this.maxThreads <= this.workers.size())) {
-                break;
-            }
+        while ((this.workerDemand.get() > 0) && (this.workers.size() < this.maxThreads)) {
             startWorker(false);
-            workersToCreate--;
         }
-    }
-
-    private int countIdleWorkers() {
-        int idleCount = 0;
-        synchronized (this.workers) {
-            for (Worker worker : this.workers) {
-                if (worker.isIdle()) {
-                    idleCount++;
-                }
-            }
-        }
-        return idleCount;
     }
 
     private Worker startWorker(final boolean keepAlive) {
         Worker worker = new Worker(this, keepAlive);
         this.workers.add(worker);
+        // event D (see workerDemand javadoc): a freshly started worker begins idle.
+        this.workerDemand.decrementAndGet();
         worker.getThread().start();
         return worker;
     }
 
     /**
-     * Terminate the give worker and remove it from the thread pool.
+     * called by a {@link Worker} once it goes idle again after completing a task (event C, see {@link #workerDemand}
+     * javadoc).
+     */
+    void onWorkerIdle() {
+        this.workerDemand.decrementAndGet();
+    }
+
+    /**
+     * Terminate the given worker and remove it from the thread pool.
      */
     protected void stopWorker(final Worker worker) {
         // a concurrent reader can never observe the worker counted in both the
@@ -221,9 +237,12 @@ public class CustomThreadPool extends AbstractExecutorService {
             this.workers.remove(worker);
             this.completedTasksCount.addAndGet(worker.getCompletedTasksCount());
         }
-
+        // event E (see workerDemand javadoc): a terminating worker leaving removes idle capacity, raising demand
+        // back up. Unconditional because Worker.run()'s loop only ever exits right after onWorkerIdle() has already
+        // run (or before ever claiming a task), i.e. always in the idle state - event F (a busy worker terminating)
+        // never actually happens with this Worker implementation.
+        this.workerDemand.incrementAndGet();
         worker.getThread().interrupt();
-
         checkTermination();
     }
 
@@ -271,6 +290,9 @@ public class CustomThreadPool extends AbstractExecutorService {
 
             // 2nd: cancel all pending tasks
             this.tasks.drainTo(unfinishedTask);
+            // event G (see workerDemand javadoc): drained tasks were never claimed by a worker, so demand raised for
+            // them at enqueue time must be withdrawn now that they're gone from the queue.
+            this.workerDemand.addAndGet(-unfinishedTask.size());
 
             // 3rd: interrupt all running threads
             synchronized (this.workers) {
@@ -389,7 +411,7 @@ public class CustomThreadPool extends AbstractExecutorService {
         }
 
         /**
-         * @return the newly constructed {@link CustomThreadPool}.
+         * @return the newly constructed, un-started {@link CustomThreadPool}.
          */
         public CustomThreadPool build() {
             if (this.threadFactory == null) {
@@ -401,6 +423,15 @@ public class CustomThreadPool extends AbstractExecutorService {
                 }
             }
             return new CustomThreadPool(this.minThreads, this.maxThreads, this.idleDuration, this.threadFactory);
+        }
+
+        /**
+         * @return the newly constructed, already started {@link CustomThreadPool}.
+         */
+        public CustomThreadPool start() {
+            var pool = build();
+            pool.start();
+            return pool;
         }
 
     }

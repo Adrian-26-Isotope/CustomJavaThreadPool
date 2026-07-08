@@ -8,7 +8,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public class Worker implements Runnable {
 
     private final CustomThreadPool threadPool;
-    private volatile boolean idle = true;
     private final boolean core;
     private final Thread thread;
     private final AtomicLong completedTasksCount = new AtomicLong(0);
@@ -51,13 +50,6 @@ public class Worker implements Runnable {
         return this.core;
     }
 
-    /**
-     * @return true if this worker is waiting for tasks.
-     */
-    protected boolean isIdle() {
-        return this.idle;
-    }
-
     @Override
     public void run() {
         try {
@@ -72,16 +64,9 @@ public class Worker implements Runnable {
     }
 
     private Runnable getTask() {
-        Runnable task = this.threadPool.pollTask(this);
-        if (task != null) {
-            // flip idle here, right as the task leaves the queue,
-            // otherwise countIdleWorkers() (used to size new workers in
-            // performAdjustment()) can still see this worker as idle even though its
-            // task has already left the queue, under-provisioning new workers by
-            // exactly the number of workers caught in that window.
-            this.idle = false;
-        }
-        return task;
+        // event B (see CustomThreadPool.workerDemand javadoc): this task leaving the queue and this worker leaving
+        // the idle pool happen together, so their effect on workerDemand cancels out - no counter update needed here.
+        return this.threadPool.pollTask(this);
     }
 
     private void runTask(final Runnable task) {
@@ -93,7 +78,7 @@ public class Worker implements Runnable {
             handleTaskError(e);
         }
         finally {
-            this.idle = true;
+            this.threadPool.onWorkerIdle();
         }
     }
 
