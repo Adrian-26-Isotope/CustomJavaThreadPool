@@ -1,3 +1,5 @@
+[![Java CI with Maven](https://github.com/Adrian-26-Isotope/CustomJavaThreadPool/actions/workflows/maven.yml/badge.svg?branch=main)](https://github.com/Adrian-26-Isotope/CustomJavaThreadPool/actions/workflows/maven.yml)
+
 # CustomThreadPool
 
 A flexible and efficient custom thread pool implementation in Java that provides variable thread management with configurable minimum and maximum thread counts, idle timeouts, and different task polling strategies.
@@ -21,7 +23,7 @@ A flexible and efficient custom thread pool implementation in Java that provides
 import adrian.os.java.threadpool.CustomThreadPool;
 
 // Create a thread pool with default settings
-CustomThreadPool threadPool = CustomThreadPool.builder().build();
+CustomThreadPool threadPool = CustomThreadPool.builder().start();
 
 // Submit a task
 threadPool.submit(() -> {
@@ -44,7 +46,7 @@ CustomThreadPool threadPool = CustomThreadPool.builder()
     .setMaxThreads(10)                                 // Maximum 10 threads
     .setIdleTime(Duration.ofSeconds(30))               // Idle timeout of 30 seconds
     .setThreadFactory(Thread.ofPlatform().factory())   // Use platform threads
-    .build();
+    .start();
 
 // Submit multiple tasks
 for (int i = 0; i < 100; i++) {
@@ -120,7 +122,7 @@ continues processing further tasks.
 2. **RUNNING**: Active state processing tasks
 3. **SHUTDOWN**: Graceful shutdown in progress
 
-The thread pool automatically starts upon construction and can be manually controlled using `start()`, `shutdown()`, and `shutdownNow()` methods.
+The thread pool can be manually controlled using `start()`, `shutdown()`, and `shutdownNow()` methods. The builder comes with `build()` & `start()` to construct or construct & start the pool.
 
 ## Examples
 
@@ -130,6 +132,7 @@ CustomThreadPool pool = CustomThreadPool.builder()
     .setMaxThreads(Runtime.getRuntime().availableProcessors())
     .setThreadFactory(Thread.ofPlatform().factory())
     .build();
+pool.start();
 
 // Submit CPU-bound tasks
 for (int i = 0; i < 1000; i++) {
@@ -146,7 +149,7 @@ CustomThreadPool pool = CustomThreadPool.builder()
     .setMaxThreads(1000)
     .setIdleTime(Duration.ofSeconds(5))
     .setThreadFactory(Thread.ofVirtual().factory()) // Default
-    .build();
+    .start();
 
 for (int i = 0; i < 10000; i++) {
     pool.submit(() -> {
